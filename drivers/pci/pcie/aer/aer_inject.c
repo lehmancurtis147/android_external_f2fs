@@ -41,12 +41,12 @@ struct aer_error_inj {
 	u32 header_log1;
 	u32 header_log2;
 	u32 header_log3;
-	u16 domain;
+	u32 domain;
 };
 
 struct aer_error {
 	struct list_head list;
-	u16 domain;
+	u32 domain;
 	unsigned int bus;
 	unsigned int devfn;
 	int pos_cap_err;
@@ -74,7 +74,7 @@ static LIST_HEAD(pci_bus_ops_list);
 /* Protect einjected and pci_bus_ops_list */
 static DEFINE_SPINLOCK(inject_lock);
 
-static void aer_error_init(struct aer_error *err, u16 domain,
+static void aer_error_init(struct aer_error *err, u32 domain,
 			   unsigned int bus, unsigned int devfn,
 			   int pos_cap_err)
 {
@@ -86,7 +86,7 @@ static void aer_error_init(struct aer_error *err, u16 domain,
 }
 
 /* inject_lock must be held before calling */
-static struct aer_error *__find_aer_error(u16 domain, unsigned int bus,
+static struct aer_error *__find_aer_error(u32 domain, unsigned int bus,
 					  unsigned int devfn)
 {
 	struct aer_error *err;
@@ -106,7 +106,7 @@ static struct aer_error *__find_aer_error_by_dev(struct pci_dev *dev)
 	int domain = pci_domain_nr(dev->bus);
 	if (domain < 0)
 		return NULL;
-	return __find_aer_error((u16)domain, dev->bus->number, dev->devfn);
+	return __find_aer_error(domain, dev->bus->number, dev->devfn);
 }
 
 /* inject_lock must be held before calling */
@@ -196,7 +196,7 @@ static int pci_read_aer(struct pci_bus *bus, unsigned int devfn, int where,
 	domain = pci_domain_nr(bus);
 	if (domain < 0)
 		goto out;
-	err = __find_aer_error((u16)domain, bus->number, devfn);
+	err = __find_aer_error(domain, bus->number, devfn);
 	if (!err)
 		goto out;
 
@@ -212,8 +212,8 @@ out:
 	return ops->read(bus, devfn, where, size, val);
 }
 
-int pci_write_aer(struct pci_bus *bus, unsigned int devfn, int where, int size,
-		  u32 val)
+static int pci_write_aer(struct pci_bus *bus, unsigned int devfn, int where,
+			 int size, u32 val)
 {
 	u32 *sim;
 	struct aer_error *err;
@@ -228,7 +228,7 @@ int pci_write_aer(struct pci_bus *bus, unsigned int devfn, int where, int size,
 	domain = pci_domain_nr(bus);
 	if (domain < 0)
 		goto out;
-	err = __find_aer_error((u16)domain, bus->number, devfn);
+	err = __find_aer_error(domain, bus->number, devfn);
 	if (!err)
 		goto out;
 
@@ -288,7 +288,7 @@ static struct pci_dev *pcie_find_root_port(struct pci_dev *dev)
 	while (1) {
 		if (!pci_is_pcie(dev))
 			break;
-		if (dev->pcie_type == PCI_EXP_TYPE_ROOT_PORT)
+		if (pci_pcie_type(dev) == PCI_EXP_TYPE_ROOT_PORT)
 			return dev;
 		if (!dev->bus->self)
 			break;
@@ -329,18 +329,18 @@ static int aer_inject(struct aer_error_inj *einj)
 	u32 sever, cor_mask, uncor_mask, cor_mask_orig = 0, uncor_mask_orig = 0;
 	int ret = 0;
 
-	dev = pci_get_domain_bus_and_slot((int)einj->domain, einj->bus, devfn);
+	dev = pci_get_domain_bus_and_slot(einj->domain, einj->bus, devfn);
 	if (!dev)
 		return -ENODEV;
 	rpdev = pcie_find_root_port(dev);
 	if (!rpdev) {
-		ret = -ENOTTY;
+		ret = -ENODEV;
 		goto out_put;
 	}
 
 	pos_cap_err = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
 	if (!pos_cap_err) {
-		ret = -ENOTTY;
+		ret = -EPERM;
 		goto out_put;
 	}
 	pci_read_config_dword(dev, pos_cap_err + PCI_ERR_UNCOR_SEVER, &sever);
@@ -350,7 +350,7 @@ static int aer_inject(struct aer_error_inj *einj)
 
 	rp_pos_cap_err = pci_find_ext_capability(rpdev, PCI_EXT_CAP_ID_ERR);
 	if (!rp_pos_cap_err) {
-		ret = -ENOTTY;
+		ret = -EPERM;
 		goto out_put;
 	}
 
@@ -397,16 +397,14 @@ static int aer_inject(struct aer_error_inj *einj)
 	if (!aer_mask_override && einj->cor_status &&
 	    !(einj->cor_status & ~cor_mask)) {
 		ret = -EINVAL;
-		printk(KERN_WARNING "The correctable error(s) is masked "
-				"by device\n");
+		printk(KERN_WARNING "The correctable error(s) is masked by device\n");
 		spin_unlock_irqrestore(&inject_lock, flags);
 		goto out_put;
 	}
 	if (!aer_mask_override && einj->uncor_status &&
 	    !(einj->uncor_status & ~uncor_mask)) {
 		ret = -EINVAL;
-		printk(KERN_WARNING "The uncorrectable error(s) is masked "
-				"by device\n");
+		printk(KERN_WARNING "The uncorrectable error(s) is masked by device\n");
 		spin_unlock_irqrestore(&inject_lock, flags);
 		goto out_put;
 	}
@@ -464,8 +462,7 @@ static int aer_inject(struct aer_error_inj *einj)
 			goto out_put;
 		}
 		aer_irq(-1, edev);
-	}
-	else
+	} else
 		ret = -EINVAL;
 out_put:
 	kfree(err_alloc);

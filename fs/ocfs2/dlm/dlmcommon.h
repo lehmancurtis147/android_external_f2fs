@@ -108,7 +108,6 @@ static inline int dlm_is_recovery_lock(const char *lock_name, int name_len)
 struct dlm_recovery_ctxt
 {
 	struct list_head resources;
-	struct list_head received;
 	struct list_head node_data;
 	u8  new_master;
 	u8  dead_node;
@@ -332,6 +331,7 @@ struct dlm_lock_resource
 	u16 state;
 	char lvb[DLM_LVB_LEN];
 	unsigned int inflight_locks;
+	unsigned int inflight_assert_workers;
 	unsigned long refmap[BITS_TO_LONGS(O2NM_MAX_NODES)];
 };
 
@@ -375,17 +375,6 @@ struct dlm_lock
 		 unlock_pending:1,
 		 lksb_kernel_allocated:1;
 };
-
-
-#define DLM_LKSB_UNUSED1           0x01
-#define DLM_LKSB_PUT_LVB           0x02
-#define DLM_LKSB_GET_LVB           0x04
-#define DLM_LKSB_UNUSED2           0x08
-#define DLM_LKSB_UNUSED3           0x10
-#define DLM_LKSB_UNUSED4           0x20
-#define DLM_LKSB_UNUSED5           0x40
-#define DLM_LKSB_UNUSED6           0x80
-
 
 enum dlm_lockres_list {
 	DLM_GRANTED_LIST = 0,
@@ -679,7 +668,7 @@ struct dlm_query_join_packet {
 };
 
 union dlm_query_join_response {
-	u32 intval;
+	__be32 intval;
 	struct dlm_query_join_packet packet;
 };
 
@@ -755,8 +744,8 @@ struct dlm_query_region {
 struct dlm_node_info {
 	u8 ni_nodenum;
 	u8 pad1;
-	u16 ni_ipv4_port;
-	u32 ni_ipv4_address;
+	__be16 ni_ipv4_port;
+	__be32 ni_ipv4_address;
 };
 
 struct dlm_query_nodeinfo {
@@ -911,6 +900,9 @@ void dlm_lockres_drop_inflight_ref(struct dlm_ctxt *dlm,
 void dlm_lockres_grab_inflight_ref(struct dlm_ctxt *dlm,
 				   struct dlm_lock_resource *res);
 
+void __dlm_lockres_grab_inflight_worker(struct dlm_ctxt *dlm,
+		struct dlm_lock_resource *res);
+
 void dlm_queue_ast(struct dlm_ctxt *dlm, struct dlm_lock *lock);
 void dlm_queue_bast(struct dlm_ctxt *dlm, struct dlm_lock *lock);
 void __dlm_queue_ast(struct dlm_ctxt *dlm, struct dlm_lock *lock);
@@ -1011,7 +1003,6 @@ void dlm_move_lockres_to_recovery_list(struct dlm_ctxt *dlm,
 
 /* will exit holding res->spinlock, but may drop in function */
 void __dlm_wait_on_lockres_flags(struct dlm_lock_resource *res, int flags);
-void __dlm_wait_on_lockres_flags_set(struct dlm_lock_resource *res, int flags);
 
 /* will exit holding res->spinlock, but may drop in function */
 static inline void __dlm_wait_on_lockres(struct dlm_lock_resource *res)
@@ -1079,11 +1070,9 @@ static inline int dlm_lock_compatible(int existing, int request)
 static inline int dlm_lock_on_list(struct list_head *head,
 				   struct dlm_lock *lock)
 {
-	struct list_head *iter;
 	struct dlm_lock *tmplock;
 
-	list_for_each(iter, head) {
-		tmplock = list_entry(iter, struct dlm_lock, list);
+	list_for_each_entry(tmplock, head, list) {
 		if (tmplock == lock)
 			return 1;
 	}

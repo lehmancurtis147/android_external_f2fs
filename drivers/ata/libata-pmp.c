@@ -460,6 +460,13 @@ static void sata_pmp_quirks(struct ata_port *ap)
 				       ATA_LFLAG_NO_SRST |
 				       ATA_LFLAG_ASSUME_ATA;
 		}
+	} else if (vendor == 0x11ab && devid == 0x4140) {
+		/* Marvell 4140 quirks */
+		ata_for_each_link(link, ap, EDGE) {
+			/* port 4 is for SEMB device and it doesn't like SRST */
+			if (link->pmp == 4)
+				link->flags |= ATA_LFLAG_DISABLED;
+		}
 	}
 }
 
@@ -533,8 +540,6 @@ int sata_pmp_attach(struct ata_device *dev)
 	ata_for_each_link(tlink, ap, EDGE)
 		sata_link_init_spd(tlink);
 
-	ata_acpi_associate_sata_port(ap);
-
 	return 0;
 
  fail:
@@ -574,8 +579,6 @@ static void sata_pmp_detach(struct ata_device *dev)
 	ap->nr_pmp_links = 0;
 	link->pmp = 0;
 	spin_unlock_irqrestore(ap->lock, flags);
-
-	ata_acpi_associate_sata_port(ap);
 }
 
 /**

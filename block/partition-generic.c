@@ -16,6 +16,7 @@
 #include <linux/kmod.h>
 #include <linux/ctype.h>
 #include <linux/genhd.h>
+#include <linux/dax.h>
 #include <linux/blktrace_api.h>
 
 #include "partitions/check.h"
@@ -84,7 +85,7 @@ ssize_t part_size_show(struct device *dev,
 		       struct device_attribute *attr, char *buf)
 {
 	struct hd_struct *p = dev_to_part(dev);
-	return sprintf(buf, "%llu\n",(unsigned long long)p->nr_sects);
+	return sprintf(buf, "%llu\n",(unsigned long long)part_nr_sects_read(p));
 }
 
 static ssize_t part_ro_show(struct device *dev,
@@ -212,8 +213,7 @@ static void part_release(struct device *dev)
 {
 	struct hd_struct *p = dev_to_part(dev);
 	blk_free_devt(dev->devt);
-	free_part_stats(p);
-	free_part_info(p);
+	hd_free_part(p);
 	kfree(p);
 }
 
@@ -233,8 +233,9 @@ static void delete_partition_rcu_cb(struct rcu_head *head)
 	put_device(part_to_dev(part));
 }
 
-void __delete_partition(struct hd_struct *part)
+void __delete_partition(struct percpu_ref *ref)
 {
+	struct hd_struct *part = container_of(ref, struct hd_struct, ref);
 	call_rcu(&part->rcu_head, delete_partition_rcu_cb);
 }
 
@@ -255,7 +256,7 @@ void delete_partition(struct gendisk *disk, int partno)
 	kobject_put(part->holder_dir);
 	device_del(part_to_dev(part));
 
-	hd_struct_put(part);
+	hd_struct_kill(part);
 }
 
 static ssize_t whole_disk_show(struct device *dev,
@@ -294,6 +295,8 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 		err = -ENOMEM;
 		goto out_free;
 	}
+
+	seqcount_init(&p->nr_sects_seq);
 	pdev = part_to_dev(p);
 
 	p->start_sect = start;
@@ -354,8 +357,8 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 	if (!dev_get_uevent_suppress(ddev))
 		kobject_uevent(&pdev->kobj, KOBJ_ADD);
 
-	hd_ref_init(p);
-	return p;
+	if (!hd_ref_init(p))
+		return p;
 
 out_free_info:
 	free_part_info(p);
@@ -395,7 +398,7 @@ static int drop_partitions(struct gendisk *disk, struct block_device *bdev)
 	struct hd_struct *part;
 	int res;
 
-	if (bdev->bd_part_count)
+	if (bdev->bd_part_count || bdev->bd_super)
 		return -EBUSY;
 	res = invalidate_partition(disk, 0);
 	if (res)
@@ -416,7 +419,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	int p, highest, res;
 rescan:
 	if (state && !IS_ERR(state)) {
-		kfree(state);
+		free_partitions(state);
 		state = NULL;
 	}
 
@@ -426,6 +429,7 @@ rescan:
 
 	if (disk->fops->revalidate_disk)
 		disk->fops->revalidate_disk(disk);
+	blk_integrity_revalidate(disk);
 	check_disk_size_change(disk, bdev);
 	bdev->bd_invalidated = 0;
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
@@ -523,7 +527,7 @@ rescan:
 			md_autodetect_dev(part_to_dev(part)->devt);
 #endif
 	}
-	kfree(state);
+	free_partitions(state);
 	return 0;
 }
 
@@ -547,13 +551,24 @@ int invalidate_partitions(struct gendisk *disk, struct block_device *bdev)
 	return 0;
 }
 
-unsigned char *read_dev_sector(struct block_device *bdev, sector_t n, Sector *p)
+static struct page *read_pagecache_sector(struct block_device *bdev, sector_t n)
 {
 	struct address_space *mapping = bdev->bd_inode->i_mapping;
+
+	return read_mapping_page(mapping, (pgoff_t)(n >> (PAGE_CACHE_SHIFT-9)),
+			NULL);
+}
+
+unsigned char *read_dev_sector(struct block_device *bdev, sector_t n, Sector *p)
+{
 	struct page *page;
 
-	page = read_mapping_page(mapping, (pgoff_t)(n >> (PAGE_CACHE_SHIFT-9)),
-				 NULL);
+	/* don't populate page cache for dax capable devices */
+	if (IS_DAX(bdev->bd_inode))
+		page = read_dax_sector(bdev, n);
+	else
+		page = read_pagecache_sector(bdev, n);
+
 	if (!IS_ERR(page)) {
 		if (PageError(page))
 			goto fail;

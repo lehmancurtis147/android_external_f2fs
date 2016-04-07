@@ -118,14 +118,13 @@ static inline struct ib_pool_fmr *ib_fmr_cache_lookup(struct ib_fmr_pool *pool,
 {
 	struct hlist_head *bucket;
 	struct ib_pool_fmr *fmr;
-	struct hlist_node *pos;
 
 	if (!pool->cache_bucket)
 		return NULL;
 
 	bucket = pool->cache_bucket + ib_fmr_hash(*page_list);
 
-	hlist_for_each_entry(fmr, pos, bucket, cache_node)
+	hlist_for_each_entry(fmr, bucket, cache_node)
 		if (io_virtual_address == fmr->io_virtual_address &&
 		    page_list_len      == fmr->page_list_len      &&
 		    !memcmp(page_list, fmr->page_list,
@@ -213,7 +212,6 @@ struct ib_fmr_pool *ib_create_fmr_pool(struct ib_pd             *pd,
 {
 	struct ib_device   *device;
 	struct ib_fmr_pool *pool;
-	struct ib_device_attr *attr;
 	int i;
 	int ret;
 	int max_remaps;
@@ -229,25 +227,10 @@ struct ib_fmr_pool *ib_create_fmr_pool(struct ib_pd             *pd,
 		return ERR_PTR(-ENOSYS);
 	}
 
-	attr = kmalloc(sizeof *attr, GFP_KERNEL);
-	if (!attr) {
-		printk(KERN_WARNING PFX "couldn't allocate device attr struct\n");
-		return ERR_PTR(-ENOMEM);
-	}
-
-	ret = ib_query_device(device, attr);
-	if (ret) {
-		printk(KERN_WARNING PFX "couldn't query device: %d\n", ret);
-		kfree(attr);
-		return ERR_PTR(ret);
-	}
-
-	if (!attr->max_map_per_fmr)
+	if (!device->attrs.max_map_per_fmr)
 		max_remaps = IB_FMR_MAX_REMAPS;
 	else
-		max_remaps = attr->max_map_per_fmr;
-
-	kfree(attr);
+		max_remaps = device->attrs.max_map_per_fmr;
 
 	pool = kmalloc(sizeof *pool, GFP_KERNEL);
 	if (!pool) {

@@ -6,7 +6,7 @@ if ISDN_I4L
 
 config ISDN_PPP
 	bool "Support synchronous PPP"
-	depends on INET && NETDEVICES
+	depends on INET
 	select SLHC
 	help
 	  Over digital connections such as ISDN, there is no need to
@@ -129,8 +129,6 @@ menu "Active cards"
 source "drivers/isdn/icn/Kconfig"
 
 source "drivers/isdn/pcbit/Kconfig"
-
-source "drivers/isdn/sc/Kconfig"
 
 source "drivers/isdn/act2000/Kconfig"
 

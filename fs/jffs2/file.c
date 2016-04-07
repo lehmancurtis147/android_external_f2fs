@@ -39,10 +39,10 @@ int jffs2_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	if (ret)
 		return ret;
 
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 	/* Trigger GC to flush any pending writes for this inode */
 	jffs2_flush_wbuf_gc(c, inode->i_ino);
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 
 	return 0;
 }
@@ -51,10 +51,8 @@ const struct file_operations jffs2_file_operations =
 {
 	.llseek =	generic_file_llseek,
 	.open =		generic_file_open,
- 	.read =		do_sync_read,
- 	.aio_read =	generic_file_aio_read,
- 	.write =	do_sync_write,
- 	.aio_write =	generic_file_aio_write,
+ 	.read_iter =	generic_file_read_iter,
+ 	.write_iter =	generic_file_write_iter,
 	.unlocked_ioctl=jffs2_ioctl,
 	.mmap =		generic_file_readonly_mmap,
 	.fsync =	jffs2_fsync,
@@ -66,6 +64,7 @@ const struct file_operations jffs2_file_operations =
 const struct inode_operations jffs2_file_inode_operations =
 {
 	.get_acl =	jffs2_get_acl,
+	.set_acl =	jffs2_set_acl,
 	.setattr =	jffs2_setattr,
 	.setxattr =	jffs2_setxattr,
 	.getxattr =	jffs2_getxattr,
@@ -181,8 +180,8 @@ static int jffs2_write_begin(struct file *filp, struct address_space *mapping,
 		ri.ino = cpu_to_je32(f->inocache->ino);
 		ri.version = cpu_to_je32(++f->highest_version);
 		ri.mode = cpu_to_jemode(inode->i_mode);
-		ri.uid = cpu_to_je16(inode->i_uid);
-		ri.gid = cpu_to_je16(inode->i_gid);
+		ri.uid = cpu_to_je16(i_uid_read(inode));
+		ri.gid = cpu_to_je16(i_gid_read(inode));
 		ri.isize = cpu_to_je32(max((uint32_t)inode->i_size, pageofs));
 		ri.atime = ri.ctime = ri.mtime = cpu_to_je32(get_seconds());
 		ri.offset = cpu_to_je32(inode->i_size);
@@ -286,8 +285,8 @@ static int jffs2_write_end(struct file *filp, struct address_space *mapping,
 	/* Set the fields that the generic jffs2_write_inode_range() code can't find */
 	ri->ino = cpu_to_je32(inode->i_ino);
 	ri->mode = cpu_to_jemode(inode->i_mode);
-	ri->uid = cpu_to_je16(inode->i_uid);
-	ri->gid = cpu_to_je16(inode->i_gid);
+	ri->uid = cpu_to_je16(i_uid_read(inode));
+	ri->gid = cpu_to_je16(i_gid_read(inode));
 	ri->isize = cpu_to_je32((uint32_t)inode->i_size);
 	ri->atime = ri->ctime = ri->mtime = cpu_to_je32(get_seconds());
 

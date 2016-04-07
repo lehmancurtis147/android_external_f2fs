@@ -3,7 +3,6 @@
 #include <linux/usb/hcd.h>
 #include <linux/usb/quirks.h>
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <asm/byteorder.h>
@@ -11,7 +10,6 @@
 
 
 #define USB_MAXALTSETTING		128	/* Hard limit */
-#define USB_MAXENDPOINTS		30	/* Hard limit */
 
 #define USB_MAXCONFIG			8	/* Arbitrary limit */
 
@@ -114,16 +112,18 @@ static void usb_parse_ss_endpoint_companion(struct device *ddev, int cfgno,
 				cfgno, inum, asnum, ep->desc.bEndpointAddress);
 		ep->ss_ep_comp.bmAttributes = 16;
 	} else if (usb_endpoint_xfer_isoc(&ep->desc) &&
-			desc->bmAttributes > 2) {
+		   USB_SS_MULT(desc->bmAttributes) > 3) {
 		dev_warn(ddev, "Isoc endpoint has Mult of %d in "
 				"config %d interface %d altsetting %d ep %d: "
-				"setting to 3\n", desc->bmAttributes + 1,
+				"setting to 3\n",
+				USB_SS_MULT(desc->bmAttributes),
 				cfgno, inum, asnum, ep->desc.bEndpointAddress);
 		ep->ss_ep_comp.bmAttributes = 2;
 	}
 
 	if (usb_endpoint_xfer_isoc(&ep->desc))
-		max_tx = (desc->bMaxBurst + 1) * (desc->bmAttributes + 1) *
+		max_tx = (desc->bMaxBurst + 1) *
+			(USB_SS_MULT(desc->bmAttributes)) *
 			usb_endpoint_maxp(&ep->desc);
 	else if (usb_endpoint_xfer_int(&ep->desc))
 		max_tx = usb_endpoint_maxp(&ep->desc) *
@@ -708,6 +708,8 @@ int usb_get_configuration(struct usb_device *dev)
 		if (result < 0) {
 			dev_err(ddev, "unable to read config index %d "
 			    "descriptor/%s: %d\n", cfgno, "start", result);
+			if (result != -EPIPE)
+				goto err;
 			dev_err(ddev, "chopping to %d config(s)\n", cfgno);
 			dev->descriptor.bNumConfigurations = cfgno;
 			break;
@@ -727,6 +729,10 @@ int usb_get_configuration(struct usb_device *dev)
 			result = -ENOMEM;
 			goto err;
 		}
+
+		if (dev->quirks & USB_QUIRK_DELAY_INIT)
+			msleep(100);
+
 		result = usb_get_descriptor(dev, USB_DT_CONFIG, cfgno,
 		    bigbuffer, length);
 		if (result < 0) {
@@ -847,6 +853,10 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 		case USB_SS_CAP_TYPE:
 			dev->bos->ss_cap =
 				(struct usb_ss_cap_descriptor *)buffer;
+			break;
+		case USB_SSP_CAP_TYPE:
+			dev->bos->ssp_cap =
+				(struct usb_ssp_cap_descriptor *)buffer;
 			break;
 		case CONTAINER_ID_TYPE:
 			dev->bos->ss_id =

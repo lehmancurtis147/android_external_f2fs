@@ -9,13 +9,13 @@
  */
 
 #define pte_ERROR(e)							\
-	printk("%s:%d: bad pte %p(%08lx%08lx).\n",			\
+	pr_err("%s:%d: bad pte %p(%08lx%08lx)\n",			\
 	       __FILE__, __LINE__, &(e), (e).pte_high, (e).pte_low)
 #define pmd_ERROR(e)							\
-	printk("%s:%d: bad pmd %p(%016Lx).\n",				\
+	pr_err("%s:%d: bad pmd %p(%016Lx)\n",				\
 	       __FILE__, __LINE__, &(e), pmd_val(e))
 #define pgd_ERROR(e)							\
-	printk("%s:%d: bad pgd %p(%016Lx).\n",				\
+	pr_err("%s:%d: bad pgd %p(%016Lx)\n",				\
 	       __FILE__, __LINE__, &(e), pgd_val(e))
 
 /* Rules for using set_pte: the pte being assigned *must* be
@@ -175,15 +175,6 @@ static inline pmd_t native_pmdp_get_and_clear(pmd_t *pmdp)
 #else
 #define native_pmdp_get_and_clear(xp) native_local_pmdp_get_and_clear(xp)
 #endif
-
-/*
- * Bits 0, 6 and 7 are taken in the low part of the pte,
- * put the 32 bits of offset into the high part.
- */
-#define pte_to_pgoff(pte) ((pte).pte_high)
-#define pgoff_to_pte(off)						\
-	((pte_t) { { .pte_low = _PAGE_FILE, .pte_high = (off) } })
-#define PTE_FILE_MAX_BITS       32
 
 /* Encode and de-code a swap entry */
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > 5)

@@ -1,6 +1,5 @@
 #include <linux/cpumask.h>
 #include <linux/interrupt.h>
-#include <linux/init.h>
 
 #include <linux/mm.h>
 #include <linux/delay.h>
@@ -18,6 +17,16 @@
 #include <asm/apic.h>
 #include <asm/proto.h>
 #include <asm/ipi.h>
+
+void default_send_IPI_single_phys(int cpu, int vector)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	__default_send_IPI_dest_field(per_cpu(x86_cpu_to_apicid, cpu),
+				      vector, APIC_DEST_PHYSICAL);
+	local_irq_restore(flags);
+}
 
 void default_send_IPI_mask_sequence_phys(const struct cpumask *mask, int vector)
 {
@@ -54,6 +63,14 @@ void default_send_IPI_mask_allbutself_phys(const struct cpumask *mask,
 				 query_cpu), vector, APIC_DEST_PHYSICAL);
 	}
 	local_irq_restore(flags);
+}
+
+/*
+ * Helper function for APICs which insist on cpumasks
+ */
+void default_send_IPI_single(int cpu, int vector)
+{
+	apic->send_IPI_mask(cpumask_of(cpu), vector);
 }
 
 #ifdef CONFIG_X86_32
@@ -106,7 +123,7 @@ void default_send_IPI_mask_logical(const struct cpumask *cpumask, int vector)
 	unsigned long mask = cpumask_bits(cpumask)[0];
 	unsigned long flags;
 
-	if (WARN_ONCE(!mask, "empty IPI mask"))
+	if (!mask)
 		return;
 
 	local_irq_save(flags);

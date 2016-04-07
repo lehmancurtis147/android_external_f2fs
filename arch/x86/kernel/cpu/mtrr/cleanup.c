@@ -98,7 +98,8 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 			continue;
 		base = range_state[i].base_pfn;
 		if (base < (1<<(20-PAGE_SHIFT)) && mtrr_state.have_fixed &&
-		    (mtrr_state.enabled & 1)) {
+		    (mtrr_state.enabled & MTRR_STATE_MTRR_ENABLED) &&
+		    (mtrr_state.enabled & MTRR_STATE_MTRR_FIXED_ENABLED)) {
 			/* Var MTRR contains UC entry below 1M? Skip it: */
 			printk(BIOS_BUG_MSG, i);
 			if (base + size <= (1<<(20-PAGE_SHIFT)))
@@ -258,15 +259,15 @@ range_to_mtrr(unsigned int reg, unsigned long range_startk,
 
 		/* Compute the maximum size with which we can make a range: */
 		if (range_startk)
-			max_align = ffs(range_startk) - 1;
+			max_align = __ffs(range_startk);
 		else
-			max_align = 32;
+			max_align = BITS_PER_LONG - 1;
 
-		align = fls(range_sizek) - 1;
+		align = __fls(range_sizek);
 		if (align > max_align)
 			align = max_align;
 
-		sizek = 1 << align;
+		sizek = 1UL << align;
 		if (debug_print) {
 			char start_factor = 'K', size_factor = 'K';
 			unsigned long start_base, size_base;
@@ -592,9 +593,16 @@ mtrr_calc_range_state(u64 chunk_size, u64 gran_size,
 		      unsigned long x_remove_base,
 		      unsigned long x_remove_size, int i)
 {
-	static struct range range_new[RANGE_NUM];
+	/*
+	 * range_new should really be an automatic variable, but
+	 * putting 4096 bytes on the stack is frowned upon, to put it
+	 * mildly. It is safe to make it a static __initdata variable,
+	 * since mtrr_calc_range_state is only called during init and
+	 * there's no way it will call itself recursively.
+	 */
+	static struct range range_new[RANGE_NUM] __initdata;
 	unsigned long range_sums_new;
-	static int nr_range_new;
+	int nr_range_new;
 	int num_reg;
 
 	/* Convert ranges to var ranges state: */
@@ -714,15 +722,15 @@ int __init mtrr_cleanup(unsigned address_bits)
 	if (mtrr_tom2)
 		x_remove_size = (mtrr_tom2 >> PAGE_SHIFT) - x_remove_base;
 
-	nr_range = x86_get_mtrr_mem_range(range, 0, x_remove_base, x_remove_size);
 	/*
 	 * [0, 1M) should always be covered by var mtrr with WB
 	 * and fixed mtrrs should take effect before var mtrr for it:
 	 */
-	nr_range = add_range_with_merge(range, RANGE_NUM, nr_range, 0,
+	nr_range = add_range_with_merge(range, RANGE_NUM, 0, 0,
 					1ULL<<(20 - PAGE_SHIFT));
-	/* Sort the ranges: */
-	sort_range(range, nr_range);
+	/* add from var mtrr at last */
+	nr_range = x86_get_mtrr_mem_range(range, nr_range,
+					  x_remove_base, x_remove_size);
 
 	range_sums = sum_ranges(range, nr_range);
 	printk(KERN_INFO "total RAM covered: %ldM\n",

@@ -19,10 +19,6 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  *  General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
- *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -32,13 +28,10 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/cpufreq.h>
-
+#include <linux/acpi.h>
+#include <acpi/processor.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
-
-#include <acpi/acpi_bus.h>
-#include <acpi/acpi_drivers.h>
-#include <acpi/processor.h>
 
 #define PREFIX "ACPI: "
 
@@ -217,9 +210,10 @@ err_ret:
  */
 void acpi_processor_throttling_init(void)
 {
-	if (acpi_processor_update_tsd_coord())
+	if (acpi_processor_update_tsd_coord()) {
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
 			"Assume no T-state coordination\n"));
+	}
 
 	return;
 }
