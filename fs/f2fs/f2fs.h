@@ -2204,7 +2204,7 @@ static inline bool f2fs_may_encrypt(struct inode *inode)
 #endif
 }
 
-#ifndef CONFIG_F2FS_FS_ENCRYPTION
+#ifdef CONFIG_F2FS_FS_ENCRYPTION
 #define fscrypt_set_d_op(i)
 #define fscrypt_get_ctx			fscrypt_notsupp_get_ctx
 #define fscrypt_release_ctx		fscrypt_notsupp_release_ctx
